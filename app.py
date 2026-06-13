@@ -1,17 +1,19 @@
 import os
 import streamlit as st
+import time
 
-# Import your existing pipeline functions
+# Import your existing document text extractor (.pdf / .docx)
 from extract_text import extract_document_text
-from llm_parser import extract_resume_data
-from ranker import score_candidate
-# Import your batch function (the one we added to main.py or pipeline.py)
-from main import rank_a_batch_of_resumes 
 
-st.set_page_config(page_title="AI Resume Parser & Ranker", layout="wide")
+# Import your updated Groq pipeline functions and schemas 
+from llm_parser import extract_resume_data, ResumeData
+from ranker import score_candidate, RankingResult
+
+st.set_page_config(page_title="AI Resume Parser & Ranker", layout="wide", page_icon="📄")
 
 st.title("📄 AI Resume Parser & Ranking System")
 st.subheader("Upload candidate resumes and match them against a Job Description")
+st.caption("Powered by Groq LPU Hardware & Llama 3.3 70B")
 
 # --- Left Column: Inputs ---
 st.markdown("### 1. Requirements & Resumes")
@@ -37,43 +39,86 @@ if st.button("🚀 Rank Candidates", type="primary"):
     elif not uploaded_files:
         st.error("Please upload at least one resume.")
     else:
-        with st.spinner("Processing resumes and evaluating match scores..."):
+        with st.spinner("Processing resumes and evaluating match scores via Groq..."):
             
-            # Temporary directory to save files so your extraction functions can read them
+            # Create a temporary folder to store files for your text extractor
             temp_dir = "temp_uploads"
             os.makedirs(temp_dir, exist_ok=True)
             
-            saved_file_paths = []
+            ranked_candidates = []
             
-            # Save uploaded files locally to pass paths into your batch function
+            # Process files step-by-step through the upgraded Groq pipeline
             for uploaded_file in uploaded_files:
                 file_path = os.path.join(temp_dir, uploaded_file.name)
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                saved_file_paths.append(file_path)
+                
+                try:
+                    # 1. Save uploaded file buffer to local disk temporary space
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    
+                    # 2. Document Text Extraction Phase (.pdf/.docx to clean string)
+                    raw_text = extract_document_text(file_path)
+                    
+                    if not raw_text.strip():
+                        st.warning(f"⚠️ Could not extract text from {uploaded_file.name}. Skipping file.")
+                        continue
+                        
+                    # 3. Pipeline Phase 1: Structured JSON Parsing via Groq/Instructor
+                    structured_resume: ResumeData = extract_resume_data(raw_text)
+                    
+                    # 4. Pipeline Phase 2: Logic Evaluation Match via Groq/Instructor
+                    evaluation: RankingResult = score_candidate(structured_resume, job_description)
+                    
+                    # 5. Append candidate data to tracking array
+                    # 5. Append candidate data to tracking array
+                    ranked_candidates.append({
+                        "name": structured_resume.name if structured_resume.name else uploaded_file.name,
+                        "filename": uploaded_file.name,
+                        "score": evaluation.score,
+                        "explanation": evaluation.explanation,
+                        "category_breakdown": evaluation.category_breakdown,
+                        "strengths": evaluation.strengths,
+                        "gaps": evaluation.gaps
+                    })
+                    time.sleep(2)
+                    
+                except Exception as e:
+                    st.error(f"❌ Pipeline breakdown on file {uploaded_file.name}: {e}")
+                    st.exception(e)
+                    
+                finally:
+                    # Cleanup individual temporary file immediately after processing to save disk space
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
             
-            try:
-                # Run your exact backend logic!
-                ranked_candidates = rank_a_batch_of_resumes(saved_file_paths, job_description)
-                
-                # --- Right Column / Results View ---
-                st.markdown("### 2. Evaluation Rankings")
-                
-                if not ranked_candidates:
-                    st.warning("No resumes were successfully processed.")
+            # --- Results View Layout Rendering ---
+            st.markdown("### 2. Evaluation Rankings")
+            
+            if not ranked_candidates:
+                st.warning("No resumes were successfully completed through the pipeline.")
+            else:
+                # Dynamically sort the list by the candidate match score (Highest scores first)
+                ranked_candidates.sort(key=lambda x: x["score"], reverse=True)
                 
                 for index, candidate in enumerate(ranked_candidates, start=1):
-                    # Display metrics for clear visual sorting
                     with st.expander(f"🏅 Rank #{index}: {candidate['name']} — Score: {candidate['score']}/100"):
                         st.markdown(f"**Filename:** {candidate['filename']}")
-                        st.markdown(f"**Fit Evaluation:**")
-                        st.write(candidate['explanation'])
-                        
-            except Exception as e:
-                st.error(f"An error occurred during batch processing: {e}")
-                
-            finally:
-                # Cleanup temporary files cleanly so your system stays organized
-                for path in saved_file_paths:
-                    if os.path.exists(path):
-                        os.remove(path)
+            
+                    if candidate['category_breakdown']:
+                        st.markdown("**Score Breakdown:**")
+                        st.write(candidate['category_breakdown'])
+                    
+                    st.markdown("**Fit Evaluation:**")
+                    st.write(candidate['explanation'])
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if candidate['strengths']:
+                            st.markdown("✅ **Strengths:**")
+                            for s in candidate['strengths']:
+                                st.write(f"- {s}")
+                    with col2:
+                        if candidate['gaps']:
+                            st.markdown("❌ **Gaps:**")
+                            for g in candidate['gaps']:
+                                st.write(f"- {g}")

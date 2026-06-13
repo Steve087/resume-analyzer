@@ -1,15 +1,23 @@
 import os
-from google import genai
-from google.genai import types
+import instructor
+from groq import Groq
+from openai import OpenAI
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-# Load env variables (The new SDK automatically finds GEMINI_API_KEY)
 load_dotenv() 
-client = genai.Client()
 
-# 1. Clean, standard Pydantic Schema
+# 1. Initialize the Groq client, wrapped with Instructor
+# This magically teaches Groq how to output perfect Pydantic objects
+client = instructor.from_groq(
+    Groq(
+        # base_url="https://openrouter.ai/api/v1",
+        api_key=os.environ.get("GROQ_API_KEY")
+    )
+)
+
+# 2. Your Exact Pydantic Schema (Unchanged!)
 class WorkHistory(BaseModel):
     company: str | None = None
     title: str | None = None
@@ -21,41 +29,51 @@ class Education(BaseModel):
     institution: str | None = None
     year: str | None = None
 
+
+class Project(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    tech_stack: list[str] = []
+
 class ResumeData(BaseModel):
     name: str | None = None
     email: str | None = None
     phone: str | None = None
     location: str | None = None
-    total_years_experience: int | None = None
-    skills: list[str]
-    projects:list[str]
-    work_history: list[WorkHistory]
-    education: list[Education]
-    certifications: list[str]
+    total_years_experience: float | None = None
+    skills: list[str] = []
+    projects: list[Project] = []  # ← structured, not list[str]
+    work_history: list[WorkHistory] = []
+    education: list[Education] = []
+    certifications: list[str] = []
 
-#@retry(wait=wait_exponential(multiplier=2, min=5, max=30), stop=stop_after_attempt(5))
-# 2. The Extraction Function
+# 3. The Clean Extraction Function
+@retry(wait=wait_exponential(multiplier=2, min=2, max=10), stop=stop_after_attempt(3))
 def extract_resume_data(raw_text: str) -> ResumeData:
-    system_prompt = """
+    try:
+        raw_text = raw_text[:6000]
+        system_prompt = """
     You are an expert HR data extraction system. Your job is to extract structured information from resumes.
-    
-    CRITICAL INSTRUCTIONS:
     - Extract ONLY facts explicitly stated in the text.
-    - If a specific field is missing, leave it as null/empty. DO NOT guess.
-    - For 'total_years_experience', calculate this based on dates if possible. If you cannot determine it, return null.
+    - If a specific field is missing, leave it as null/empty. DO NOT guess or infer.
+    - For total_years_experience: calculate from work history dates if possible, otherwise return null.
+    - For skills: extract only explicitly listed skills, not inferred ones.
+    - For projects: extract project name, descriptions and tech_stack(list of technologies used).
     """
 
-    # We use the modern client and the newer 2.5-flash model
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=f"Extract data from this resume:\n\n{raw_text}",
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            response_mime_type="application/json",
-            response_schema=ResumeData,
+        # Look how clean this is! No json parsing needed. 
+        # Instructor returns your Python object directly.
+        resume_data_object = client.chat.completions.create(
+            model='llama-3.3-70b-versatile',
+            response_model=ResumeData, # This is where the magic happens
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Extract all structured data from the following resume text:\n\n{raw_text}"}
+            ],
             temperature=0.0
-        ),
-    )
+        )
 
-    # Convert the resulting JSON directly into our Python object
-    return ResumeData.model_validate_json(response.text)
+        return resume_data_object
+    except Exception as e:
+        print(f"Parser error: {e}")
+        raise
