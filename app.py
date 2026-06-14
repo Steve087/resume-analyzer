@@ -5,7 +5,7 @@ import time
 # Import your existing document text extractor (.pdf / .docx)
 from extract_text import extract_document_text
 
-# Import your updated Groq pipeline functions and schemas 
+# Import your updated pipeline functions and schemas 
 from llm_parser import extract_resume_data, ResumeData
 from ranker import score_candidate, RankingResult
 
@@ -13,7 +13,19 @@ st.set_page_config(page_title="AI Resume Parser & Ranker", layout="wide", page_i
 
 st.title("📄 AI Resume Parser & Ranking System")
 st.subheader("Upload candidate resumes and match them against a Job Description")
-st.caption("Powered by Groq LPU Hardware & Llama 3.3 70B")
+
+# --- Sidebar Configuration ---
+st.sidebar.title("⚙️ Settings")
+model_provider = st.sidebar.selectbox(
+    "Select Model Provider",
+    ["Ollama (Local)", "Groq (API)"]
+)
+
+# Dynamically change caption based on choice
+if model_provider == "Groq (API)":
+    st.caption("Powered by Groq LPU Hardware & Llama 3.3 70B")
+else:
+    st.caption("Powered by Local Ollama & Mistral")
 
 # --- Left Column: Inputs ---
 st.markdown("### 1. Requirements & Resumes")
@@ -39,7 +51,7 @@ if st.button("🚀 Rank Candidates", type="primary"):
     elif not uploaded_files:
         st.error("Please upload at least one resume.")
     else:
-        with st.spinner("Processing resumes and evaluating match scores via Groq..."):
+        with st.spinner(f"Processing resumes via {model_provider}..."):
             
             # Create a temporary folder to store files for your text extractor
             temp_dir = "temp_uploads"
@@ -47,7 +59,7 @@ if st.button("🚀 Rank Candidates", type="primary"):
             
             ranked_candidates = []
             
-            # Process files step-by-step through the upgraded Groq pipeline
+            # Process files step-by-step through the upgraded pipeline
             for uploaded_file in uploaded_files:
                 file_path = os.path.join(temp_dir, uploaded_file.name)
                 
@@ -63,13 +75,19 @@ if st.button("🚀 Rank Candidates", type="primary"):
                         st.warning(f"⚠️ Could not extract text from {uploaded_file.name}. Skipping file.")
                         continue
                         
-                    # 3. Pipeline Phase 1: Structured JSON Parsing via Groq/Instructor
-                    structured_resume: ResumeData = extract_resume_data(raw_text)
+                    # 3. Pipeline Phase 1: Structured Parsing (Passing the provider choice!)
+                    structured_resume: ResumeData = extract_resume_data(raw_text, provider=model_provider)
+
+                    # DEBUG - temporary inspection prints
+                    print(f"\n--- {uploaded_file.name} ---")
+                    print(f"Skills: {structured_resume.skills}")
+                    print(f"Projects: {[(p.name, p.tech_stack) for p in structured_resume.projects]}")
+                    print(f"Work History: {[(w.title, w.summary) for w in structured_resume.work_history]}")
+                    print(f"Certifications: {structured_resume.certifications}")
                     
-                    # 4. Pipeline Phase 2: Logic Evaluation Match via Groq/Instructor
-                    evaluation: RankingResult = score_candidate(structured_resume, job_description)
+                    # 4. Pipeline Phase 2: Logic Evaluation Match (Passing the provider choice!)
+                    evaluation: RankingResult = score_candidate(structured_resume, job_description, provider=model_provider)
                     
-                    # 5. Append candidate data to tracking array
                     # 5. Append candidate data to tracking array
                     ranked_candidates.append({
                         "name": structured_resume.name if structured_resume.name else uploaded_file.name,
@@ -80,14 +98,14 @@ if st.button("🚀 Rank Candidates", type="primary"):
                         "strengths": evaluation.strengths,
                         "gaps": evaluation.gaps
                     })
-                    time.sleep(2)
+                    time.sleep(1) # Reduced slightly for cloud API usage
                     
                 except Exception as e:
                     st.error(f"❌ Pipeline breakdown on file {uploaded_file.name}: {e}")
                     st.exception(e)
                     
                 finally:
-                    # Cleanup individual temporary file immediately after processing to save disk space
+                    # Cleanup individual temporary file immediately after processing
                     if os.path.exists(file_path):
                         os.remove(file_path)
             
@@ -104,21 +122,21 @@ if st.button("🚀 Rank Candidates", type="primary"):
                     with st.expander(f"🏅 Rank #{index}: {candidate['name']} — Score: {candidate['score']}/100"):
                         st.markdown(f"**Filename:** {candidate['filename']}")
             
-                    if candidate['category_breakdown']:
-                        st.markdown("**Score Breakdown:**")
-                        st.write(candidate['category_breakdown'])
-                    
-                    st.markdown("**Fit Evaluation:**")
-                    st.write(candidate['explanation'])
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if candidate['strengths']:
-                            st.markdown("✅ **Strengths:**")
-                            for s in candidate['strengths']:
-                                st.write(f"- {s}")
-                    with col2:
-                        if candidate['gaps']:
-                            st.markdown("❌ **Gaps:**")
-                            for g in candidate['gaps']:
-                                st.write(f"- {g}")
+                        if candidate['category_breakdown']:
+                            st.markdown("**Score Breakdown:**")
+                            st.write(candidate['category_breakdown'])
+                        
+                        st.markdown("**Fit Evaluation:**")
+                        st.write(candidate['explanation'])
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if candidate['strengths']:
+                                st.markdown("✅ **Strengths:**")
+                                for s in candidate['strengths']:
+                                    st.write(f"- {s}")
+                        with col2:
+                            if candidate['gaps']:
+                                st.markdown("❌ **Gaps:**")
+                                for g in candidate['gaps']:
+                                    st.write(f"- {g}")
