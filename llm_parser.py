@@ -8,7 +8,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 load_dotenv()
 
-# Clients
+# --- Clients ---
 ollama_client = instructor.from_openai(
     OpenAI(base_url="http://localhost:11434/v1", api_key="ollama"),
     mode=instructor.Mode.JSON
@@ -19,7 +19,12 @@ groq_client = instructor.from_groq(
     mode=instructor.Mode.JSON
 )
 
-# Schemas
+gemini_client = instructor.from_provider(
+    "google/gemini-2.5-flash",
+     mode=instructor.Mode.GENAI_STRUCTURED_OUTPUTS
+)
+
+# --- Schemas ---
 class WorkHistory(BaseModel):
     company: str | None = None
     title: str | None = None
@@ -48,7 +53,7 @@ class ResumeData(BaseModel):
     education: list[Education] = []
     certifications: list[str] = []
 
-# Single extraction function with provider parameter
+# --- Extraction Function ---
 @retry(wait=wait_exponential(multiplier=2, min=2, max=10), stop=stop_after_attempt(3))
 def extract_resume_data(raw_text: str, provider: str = "Ollama (Local)") -> ResumeData:
     try:
@@ -57,9 +62,12 @@ def extract_resume_data(raw_text: str, provider: str = "Ollama (Local)") -> Resu
         if provider == "Groq (API)":
             client = groq_client
             model_name = "llama-3.3-70b-versatile"
+        elif provider == "Gemini (API)":
+            client = gemini_client
+            model_name = None
         else:
             client = ollama_client
-            model_name = "llama3.1:8b"  # back to llama, not mistral
+            model_name = "llama3.1:8b"
 
         system_prompt = """
 You are an expert HR data extraction system. Extract structured information from resumes.
@@ -72,17 +80,20 @@ You are an expert HR data extraction system. Extract structured information from
   (summary must include responsibilities AND technologies used in that role).
 """
 
-        resume_data_object = client.chat.completions.create(
-            model=model_name,
-            response_model=ResumeData,
-            messages=[
+        kwargs = {
+            "response_model": ResumeData,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Extract all structured data from the following resume text:\n\n{raw_text}"}
             ],
-            temperature=0.0
-        )
+            
+        }
+        if model_name:  # Groq and Ollama
+            kwargs["model"] = model_name
+            kwargs["temperature"] = 0.0
 
-        return resume_data_object
+        return client.chat.completions.create(**kwargs)
+
     except Exception as e:
         print(f"Parser error: {e}")
         raise

@@ -1,16 +1,16 @@
 import os
+import re
 import instructor
 from groq import Groq
 from openai import OpenAI
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from llm_parser import ResumeData 
+from llm_parser import ResumeData
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-load_dotenv() 
+load_dotenv()
 
-# 1. Initialize the Groq client wrapped with Instructor
-# Replace the client setup at the top
+# --- Clients ---
 ollama_client = instructor.from_openai(
     OpenAI(base_url="http://localhost:11434/v1", api_key="ollama"),
     mode=instructor.Mode.JSON
@@ -21,7 +21,12 @@ groq_client = instructor.from_groq(
     mode=instructor.Mode.JSON
 )
 
-# 2. Your Schema for the Output
+gemini_client = instructor.from_provider(
+    "google/gemini-2.5-flash",
+     mode=instructor.Mode.GENAI_STRUCTURED_OUTPUTS
+)
+
+# --- Schema ---
 class RankingResult(BaseModel):
     score: int
     category_breakdown: str = ""
@@ -29,30 +34,27 @@ class RankingResult(BaseModel):
     strengths: list[str] = []
     gaps: list[str] = []
 
-
-# 3. The Scoring Function
-# At the top of score_candidate() in ranker.py
+# --- Helper ---
 def parse_breakdown_sum(category_breakdown: str) -> int | None:
-    """Extract numbers from breakdown string and sum them"""
-    import re
     numbers = re.findall(r'(\d+)/\d+', category_breakdown)
     if len(numbers) == 5:
         return sum(int(n) for n in numbers)
     return None
 
-# In score_candidate(), after getting result:
-
+# --- Scoring Function ---
 @retry(wait=wait_exponential(multiplier=2, min=4, max=30), stop=stop_after_attempt(3))
 def score_candidate(resume: ResumeData, job_description: str, provider: str = "Ollama (Local)") -> RankingResult:
     try:
         if provider == "Groq (API)":
             client = groq_client
             model_name = "llama-3.3-70b-versatile"
+        elif provider == "Gemini (API)":
+            client = gemini_client
+            model_name = None
         else:
             client = ollama_client
             model_name = "llama3.1:8b"
 
-        
         system_prompt = """
 You are an expert technical recruiter evaluating candidates for any job role.
 
@@ -94,25 +96,17 @@ LEADERSHIP (5 points — HARD CAP, never exceed 5):
 - 2-3: Campus ambassador, community leader, organizer of technical events
 - 1-2: Member of any club, volunteer, or holder of any recognized certificate
 - 0: Nothing mentioned
-- ABSOLUTE MAXIMUM = 5. If calculated score exceeds 5, set it to 5.
+- ABSOLUTE MAXIMUM = 5.
 
 TIEBREAKER (when scores would be equal):
 - Candidate with real internship ranks higher than one with only projects
 - Candidate with more deployed projects ranks higher
-- Candidate with more relevant tech stack ranks higher
 - Never give the same final score to two candidates with clearly different profiles
 
 BEFORE LISTING ANY GAP:
-- Check the extracted skills list
-- Check the project tech stacks
-- Check work history summaries
-- Only list as a gap if 100% absent from ALL three sources
+- Check skills, project tech stacks, and work history summaries
+- Only list as a gap if 100% absent from ALL sources
 - If unsure, do not list it as a gap
-
-FINAL MATH CHECK:
-- Sum: Skills + Projects + Experience + Certs + Leadership = Total
-- If sum does not equal final score, recalculate
-- Never output a score that doesn't match the breakdown sum
 
 RULES:
 - Output breakdown as: Skills:X/35, Projects:X/25, Experience:X/25, Certs:X/10, Leadership:X/5
@@ -120,25 +114,15 @@ RULES:
 - Be deterministic and consistent
 """
 
-        # Anonymize data to prevent LLM bias (Excellent implementation!)
-        resume_anon = resume.model_copy()
+        resume_anon = resume.model_copy(deep=True)
         resume_anon.name = "[REDACTED]"
         resume_anon.email = "[REDACTED]"
         resume_anon.phone = "[REDACTED]"
-        resume_anon.location = "[REDACTED]" 
+        resume_anon.location = "[REDACTED]"
 
-        # We can pass the dictionary structure straight into the chat messages list
         resume_dict = resume_anon.model_dump()
 
-        # Call Groq utilizing Instructor to return a validated Pydantic object
-        ranking_result_object = client.chat.completions.create(
-            model=model_name,
-            response_model=RankingResult, # Guarantees matching schema output
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user", 
-                    "content": f"""Job Description:
+        user_content = f"""Job Description:
 <job_description>
 {job_description}
 </job_description>
@@ -156,30 +140,34 @@ Extracted fields for quick reference:
 
 INSTRUCTIONS:
 1. Check extracted fields above before marking any skill as missing
-2. Tech found in project tech stacks counts as a skill
-3. Tech mentioned in work history summaries counts as a skill
-4. Score each category per the rubric
-5. Output: Skills:X/35, Projects:X/25, Experience:X/25, Certs:X/10, Leadership:X/5
-6. Five scores MUST sum to final score
-7. Leadership max is 5
-8. Never list something as a gap if it appears in extracted fields above"""
-                }
-            ],
-            temperature=0.0 # Changed from 0.2 to 0.0 to ensure deterministic, consistent scoring!
-        )
-        
+2. Tech in project tech stacks or work summaries counts as a skill
+3. Score each category per the rubric
+4. Output: Skills:X/35, Projects:X/25, Experience:X/25, Certs:X/10, Leadership:X/5
+5. Five scores MUST sum to final score
+6. Leadership max is 5
+7. Never list something as a gap if it appears in extracted fields above"""
 
-# Recalculate score from breakdown to fix math errors
+        kwargs = {
+            "response_model": RankingResult,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            
+        }
+        if model_name:  # Groq and Ollama
+            kwargs["model"] = model_name
+            kwargs["temperature"] = 0.0
+
+        ranking_result_object = client.chat.completions.create(**kwargs)
+
+        # Fix math errors by recalculating from breakdown
         calculated = parse_breakdown_sum(ranking_result_object.category_breakdown)
         if calculated:
             ranking_result_object.score = min(calculated, 100)
 
         return ranking_result_object
 
-        
     except Exception as e:
         print(f"Raw error: {e}")
         raise
-
-
-    
