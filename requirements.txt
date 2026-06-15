@@ -1,5 +1,12 @@
-pdfplumber
+streamlit
+instructor
+groq
+openai
+google-genai
+pymupdf
 python-docx
 pydantic
-google-genai
-streamlit
+tenacity
+python-dotenv
+jsonref
+langdetect

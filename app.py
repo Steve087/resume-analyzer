@@ -4,7 +4,13 @@ import shutil
 import streamlit as st
 from pathlib import Path
 
-from extract_text import extract_document_text
+from extract_text import (
+    extract_document_text,
+    EmptyTextExtractionError,
+    ScannedPDFError,
+    UnsupportedLanguageError,
+    CorruptFileError
+)
 from llm_parser import extract_resume_data, ResumeData
 from ranker import score_candidate, RankingResult
 
@@ -109,6 +115,14 @@ if st.button("🚀 Rank Candidates", type="primary"):
                         import time
                         time.sleep(2)
 
+                except EmptyTextExtractionError as e:
+                    st.warning(f"⚠️ {uploaded_file.name}: No text found. This may be a scanned PDF.")
+                except UnsupportedLanguageError as e:
+                    st.warning(f"⚠️ {uploaded_file.name}: Non-English resume detected. Only English is supported.")
+                except CorruptFileError as e:
+                    st.error(f"❌ {uploaded_file.name}: File appears corrupt or password-protected.")
+                except ValueError as e:
+                    st.error(f"❌ {uploaded_file.name}: {e}")
                 except Exception as e:
                     st.error(f"❌ Pipeline breakdown on file {uploaded_file.name}: {e}")
                     st.exception(e)
