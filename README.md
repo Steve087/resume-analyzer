@@ -141,7 +141,21 @@ Different providers have different rate limits and quality. Use Ollama locally f
 
 ---
 
+## Sample Run
 
+**JD:** Data Analyst Intern  
+**Model:** Gemini 2.0 Flash
+
+| Rank | Candidate | Score |
+|---|---|---|
+| #1 | Aleena Mariya Sebastian | 91/100 |
+| #2 | Sharon Devasia | 55/100 |
+| #3 | Steve Jose | 40/100 |
+| #4 | Joe Abraham K | 27/100 |
+| #5 | Shijin Abraham | 22/100 |
+| #6 | Sreya Satheesan | 14/100 |
+
+---
 
 ## Requirements
 
