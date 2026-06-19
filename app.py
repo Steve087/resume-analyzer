@@ -20,10 +20,20 @@ st.title("📄 AI Resume Parser & Ranking System")
 st.subheader("Upload candidate resumes and match them against a Job Description")
 
 # --- Sidebar ---
-st.sidebar.title("⚙️ Settings")
+# Check if running on Streamlit Cloud
+try:
+    is_cloud = st.secrets.get("GROQ_API_KEY") is not None
+except:
+    is_cloud = False
+
+if is_cloud:
+    providers = ["Groq (API)", "Gemini (API)"]
+else:
+    providers = ["Ollama (Local)", "Groq (API)", "Gemini (API)"]
+
 model_provider = st.sidebar.selectbox(
     "Select Model Provider",
-    ["Ollama (Local)", "Groq (API)", "Gemini (API)"]
+    providers
 )
 
 if st.sidebar.button("🗑️ Clear Cache"):

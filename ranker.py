@@ -22,7 +22,7 @@ groq_client = instructor.from_groq(
 )
 
 gemini_client = instructor.from_provider(
-    "google/gemini-2.5-flash",
+    "google/gemini-2.0-flash",
      mode=instructor.Mode.GENAI_STRUCTURED_OUTPUTS
 )
 
