@@ -22,7 +22,7 @@ groq_client = instructor.from_groq(
 )
 
 gemini_client = instructor.from_provider(
-    "google/gemini-2.0-flash",
+    "google/gemini-3.5-flash",
      mode=instructor.Mode.GENAI_STRUCTURED_OUTPUTS
 )
 
@@ -176,7 +176,7 @@ INSTRUCTIONS:
         return ranking_result_object
 
     except Exception as e:
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower():
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower() or "503" in str(e) or "UNAVAILABLE" in str(e):
             raise RateLimitError(str(e))  # Don't retry rate limits
         print(f"Parser error: {e}")
         raise

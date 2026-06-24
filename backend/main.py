@@ -2,6 +2,7 @@ import os
 import json
 import shutil
 from pathlib import Path
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,7 +18,15 @@ from extract_text import (
 from llm_parser import extract_resume_data, ResumeData
 from ranker import score_candidate, RankingResult
 
-app = FastAPI(title="Resume Analyzer API")
+@asynccontextmanager
+async def lifespan(app):
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    gemini_key = os.environ.get("GOOGLE_API_KEY", "")
+    print(f"GROQ_API_KEY: {'✓ Found' if groq_key else '✗ Missing'} ({groq_key[:10]}...)")
+    print(f"GOOGLE_API_KEY: {'✓ Found' if gemini_key else '✗ Missing'} ({gemini_key[:10]}...)")
+    yield
+
+app = FastAPI(title="Resume Analyzer API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,7 +50,7 @@ def save_cached_resume(filename: str, resume: ResumeData):
     cache_path.write_text(resume.model_dump_json(), encoding='utf-8')
 
 def is_rate_limit(e: Exception) -> bool:
-    return any(x in str(e) for x in ["429", "RESOURCE_EXHAUSTED", "quota", "RateLimitError", "rate_limit"])
+    return any(x in str(e) for x in ["429", "RESOURCE_EXHAUSTED", "quota", "RateLimitError", "rate_limit", "503", "UNAVAILABLE"])
 
 class CandidateResult(BaseModel):
     name: str
@@ -92,15 +101,19 @@ async def rank_resumes(
 
             if structured_resume:
                 cached = True
+                print(f"[{uploaded_file.filename}] 📦 Using cached parse data")
             else:
                 for provider in ["Gemini (API)", "Groq (API)", "Ollama (Local)"]:
                     try:
+                        print(f"[{uploaded_file.filename}] Trying parse with {provider}...")
                         structured_resume = extract_resume_data(raw_text, provider=provider)
                         parse_provider = provider
+                        print(f"[{uploaded_file.filename}] ✓ Parsed with {provider}")
                         save_cached_resume(uploaded_file.filename, structured_resume)
                         break
                     except Exception as e:
                         if is_rate_limit(e):
+                            print(f"[{uploaded_file.filename}] ✗ {provider} — {'Daily quota exhausted' if 'quota' in str(e).lower() else 'Rate limited'}")
                             continue
                         raise
 
@@ -113,11 +126,14 @@ async def rank_resumes(
             evaluation = None
             for provider in ["Gemini (API)", "Groq (API)", "Ollama (Local)"]:
                 try:
+                    print(f"[{uploaded_file.filename}] Trying rank with {provider}...")
                     evaluation = score_candidate(structured_resume, job_description, provider=provider)
                     rank_provider = provider
+                    print(f"[{uploaded_file.filename}] ✓ Ranked with {provider}")
                     break
                 except Exception as e:
                     if is_rate_limit(e):
+                        print(f"[{uploaded_file.filename}] ✗ {provider} — {'Daily quota exhausted' if 'quota' in str(e).lower() else 'Rate limited'}")
                         continue
                     raise
 

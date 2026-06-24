@@ -9,8 +9,22 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_e
 
 
 
+
 load_dotenv()
 
+# Debug
+import google.genai as genai
+key = os.environ.get("GOOGLE_API_KEY", "NOT FOUND")
+print(f"Testing Gemini key: {key[:15]}...")
+try:
+    test_client = genai.Client(api_key=key)
+    response = test_client.models.generate_content(
+        model="gemini-3.5-flash",
+        contents="Say hello"
+    )
+    print(f"Gemini test: ✓ Working — {response.text[:50]}")
+except Exception as e:
+    print(f"Gemini test: ✗ Failed — {str(e)[:100]}")
 # --- Clients ---
 ollama_client = instructor.from_openai(
     OpenAI(base_url="http://localhost:11434/v1", api_key="ollama"),
@@ -23,7 +37,7 @@ groq_client = instructor.from_groq(
 )
 
 gemini_client = instructor.from_provider(
-    "google/gemini-2.0-flash",
+    "google/gemini-3.5-flash",
      mode=instructor.Mode.GENAI_STRUCTURED_OUTPUTS
 )
 
@@ -105,7 +119,7 @@ You are an expert HR data extraction system. Extract structured information from
         return client.chat.completions.create(**kwargs)
 
     except Exception as e:
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower():
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower() or "503" in str(e) or "UNAVAILABLE" in str(e):
             raise RateLimitError(str(e))  # Don't retry rate limits
         print(f"Parser error: {e}")
         raise
