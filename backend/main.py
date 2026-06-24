@@ -120,8 +120,13 @@ async def rank_resumes(
                         raise
 
             if not structured_resume:
-                errors.append(f"{uploaded_file.filename}: All API providers rate limited.")
+                errors.append(
+                    f"{uploaded_file.filename}: All AI providers are currently busy. "
+                    "Please try again in a few minutes."
+                )
                 continue
+
+            
 
             # Rank
             rank_provider = ""
@@ -140,7 +145,10 @@ async def rank_resumes(
                     raise
 
             if not evaluation:
-                errors.append(f"{uploaded_file.filename}: All API providers rate limited for ranking.")
+                errors.append(
+                    f"{uploaded_file.filename}: Ranking unavailable right now. "
+                    "Please try again in a few minutes."
+                )
                 continue
 
             # Build log
@@ -170,7 +178,11 @@ async def rank_resumes(
         except ValueError as e:
             errors.append(f"{uploaded_file.filename}: {str(e)}")
         except Exception as e:
-            errors.append(f"{uploaded_file.filename}: Unexpected error — {str(e)}")
+            error_str = str(e)
+            if "InstructorRetryException" in error_str or "RetryError" in error_str:
+                errors.append(f"{uploaded_file.filename}: All AI providers are currently busy. Please try again in a few minutes.")
+            else:
+                errors.append(f"{uploaded_file.filename}: Unexpected error — {error_str}")
 
         finally:
             if file_path.exists():
