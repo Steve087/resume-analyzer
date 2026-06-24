@@ -4,7 +4,10 @@ from groq import Groq
 from openai import OpenAI
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
+
+
+
 
 load_dotenv()
 
@@ -53,8 +56,15 @@ class ResumeData(BaseModel):
     education: list[Education] = []
     certifications: list[str] = []
 
+
+class RateLimitError(Exception):
+    pass
 # --- Extraction Function ---
-@retry(wait=wait_exponential(multiplier=2, min=2, max=10), stop=stop_after_attempt(3))
+@retry(
+    wait=wait_exponential(multiplier=2, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_not_exception_type(RateLimitError)  # Don't retry rate limits
+)
 def extract_resume_data(raw_text: str, provider: str = "Ollama (Local)") -> ResumeData:
     try:
         raw_text = raw_text[:6000]
@@ -95,5 +105,7 @@ You are an expert HR data extraction system. Extract structured information from
         return client.chat.completions.create(**kwargs)
 
     except Exception as e:
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower():
+            raise RateLimitError(str(e))  # Don't retry rate limits
         print(f"Parser error: {e}")
         raise

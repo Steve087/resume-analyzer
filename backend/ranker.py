@@ -6,7 +6,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from llm_parser import ResumeData
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
 load_dotenv()
 
@@ -41,8 +41,15 @@ def parse_breakdown_sum(category_breakdown: str) -> int | None:
         return sum(int(n) for n in numbers)
     return None
 
+class RateLimitError(Exception):
+    pass
 # --- Scoring Function ---
-@retry(wait=wait_exponential(multiplier=2, min=4, max=30), stop=stop_after_attempt(3))
+@retry(
+    wait=wait_exponential(multiplier=2, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_not_exception_type(RateLimitError)  # Don't retry rate limits
+)
+
 def score_candidate(resume: ResumeData, job_description: str, provider: str = "Ollama (Local)") -> RankingResult:
     try:
         if provider == "Groq (API)":
@@ -169,5 +176,7 @@ INSTRUCTIONS:
         return ranking_result_object
 
     except Exception as e:
-        print(f"Raw error: {e}")
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower():
+            raise RateLimitError(str(e))  # Don't retry rate limits
+        print(f"Parser error: {e}")
         raise
