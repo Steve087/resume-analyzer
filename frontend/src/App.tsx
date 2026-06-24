@@ -40,9 +40,17 @@ export default function App() {
       });
       setCandidates(res.data.candidates);
       setErrors(res.data.errors);
-    } catch {
-      alert("Could not reach the backend. Make sure the API server is running.");
-    } finally {
+    } catch (error: any) {
+        if (error.response) {
+    // Backend returned an error
+          setErrors([`Server error: ${error.response.status}. Please try again.`]);
+  }     else if (error.request) {
+    // No response from backend
+    setErrors(["Could not reach the server. It may be starting up — please wait 30 seconds and try again."]);
+  } else {
+    setErrors(["Something went wrong. Please try again."]);
+  }
+}finally {
       setLoading(false);
     }
   };
