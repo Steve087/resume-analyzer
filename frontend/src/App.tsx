@@ -15,7 +15,7 @@ interface Candidate {
   log: string;
 }
 
-const API = "http://localhost:8000";
+const API = "https://resume-analyzer-xx0x.onrender.com";
 
 export default function App() {
   const [jd, setJd] = useState("");
