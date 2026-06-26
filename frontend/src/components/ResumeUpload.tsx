@@ -79,9 +79,22 @@ export default function ResumeUpload({ files, onChange, dragging, setDragging }:
               background: "rgba(99,102,241,0.1)",
               border: "1px solid rgba(99,102,241,0.25)",
               borderRadius: 6, padding: "0.3rem 0.75rem",
-              fontSize: 12, color: "#818cf8"
+              fontSize: 12, color: "#818cf8",
+              display: "flex", alignItems: "center", gap: "0.5rem"
             }}>
               📎 {f.name}
+               <span
+                  onClick={() => onChange( ()=> files.filter((_, idx) => idx !== i))}
+                  style={{
+                    cursor: "pointer",
+                    color: "#f87171",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    lineHeight: 1,
+                  }}
+                >
+                  ×
+                </span>
             </div>
           ))}
         </div>
